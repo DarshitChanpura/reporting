@@ -488,6 +488,17 @@ integTest {
             excludeTestsMatching "org.opensearch.integTest.bwc.*IT"
         }
     }
+
+    // only run resource-sharing tests if feature is enabled
+    if (System.getProperty("resource_sharing.enabled") != "true") {
+        filter {
+            excludeTestsMatching "org.opensearch.integTest.rest.ResourceSharingIT"
+        }
+    } else {
+        filter {
+            includeTestsMatching "org.opensearch.integTest.rest.ResourceSharingIT"
+        }
+    }
 }
 
 

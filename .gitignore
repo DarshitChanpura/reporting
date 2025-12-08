@@ -314,3 +314,6 @@ local-test
 .local-*
 
 /artifacts/
+
+.classpath
+.project
