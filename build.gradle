@@ -445,7 +445,7 @@ tasks.named("check").configure { dependsOn(integTest) }
 
 // === Setup security test ===
 // This flag indicates the existence of security plugin
-def securityEnabled = System.getProperty("security.enabled", "false") == "true"
+def securityEnabled = System.getProperty("security", "false") == "true"
 
 integTest {
     dependsOn "bundlePlugin"

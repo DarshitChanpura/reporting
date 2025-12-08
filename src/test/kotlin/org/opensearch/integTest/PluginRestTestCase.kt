@@ -223,6 +223,13 @@ abstract class PluginRestTestCase : OpenSearchRestTestCase() {
         return executeRequest(restClient, request, expectedRestStatus)
     }
 
+    private fun executeAdminRequest(
+        request: Request,
+        expectedRestStatus: Int? = null
+    ): JsonObject {
+        return executeRequest(adminClient(), request, expectedRestStatus)
+    }
+
     private fun executeRequest(request: Request, expectedRestStatus: Int? = null): JsonObject {
         return executeRequest(client(), request, expectedRestStatus)
     }
@@ -278,7 +285,7 @@ abstract class PluginRestTestCase : OpenSearchRestTestCase() {
         val restOptionsBuilder = RequestOptions.DEFAULT.toBuilder()
         restOptionsBuilder.addHeader("Content-Type", "application/json")
         request.setOptions(restOptionsBuilder)
-        return executeRequest(request)
+        return executeAdminRequest(request)
     }
 
     @Throws(IOException::class)
@@ -293,7 +300,13 @@ abstract class PluginRestTestCase : OpenSearchRestTestCase() {
         }
     }
 
-    protected fun generatePassword(username: String): String = "${username}_pwd"
+    protected fun generatePassword(username: String): String {
+        val allowed = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#\$%^&*()-_"
+        val length = 16
+        return (1..length)
+            .map { allowed.random() }
+            .joinToString("")
+    }
 
     @Throws(IOException::class)
     protected fun createUser(username: String, password: String, backendRoles: List<String> = emptyList()) {
@@ -315,13 +328,13 @@ abstract class PluginRestTestCase : OpenSearchRestTestCase() {
         optionsBuilder.addHeader("Content-Type", "application/json")
         request.setOptions(optionsBuilder)
         request.setJsonEntity(body)
-        executeRequest(request)
+        executeAdminRequest(request)
     }
 
     protected fun deleteUser(username: String) {
         val request = Request("DELETE", "/_plugins/_security/api/internalusers/$username")
         try {
-            executeRequest(request)
+            executeAdminRequest(request)
         } catch (_: Exception) {
         }
     }
@@ -396,7 +409,7 @@ abstract class PluginRestTestCase : OpenSearchRestTestCase() {
         val options = RequestOptions.DEFAULT.toBuilder()
         options.addHeader("Content-Type", "application/json")
         request.setOptions(options)
-        return executeRequest(request)
+        return executeAdminRequest(request)
     }
 
     @Throws(IOException::class)
@@ -439,7 +452,6 @@ abstract class PluginRestTestCase : OpenSearchRestTestCase() {
         val body = """
             {
               "cluster_permissions": [
-                "cluster:admin/opensearch/reports/*",
                 "cluster:admin/opendistro/reports/*",
                 "cluster:admin/settings/update"
               ],
@@ -466,7 +478,7 @@ abstract class PluginRestTestCase : OpenSearchRestTestCase() {
         options.addHeader("Content-Type", "application/json")
         request.setOptions(options)
         request.setJsonEntity(body)
-        executeRequest(request)
+        executeAdminRequest(request)
     }
 
     @Throws(IOException::class)
@@ -474,10 +486,11 @@ abstract class PluginRestTestCase : OpenSearchRestTestCase() {
         val body = """
             {
               "cluster_permissions": [
-                "cluster:admin/opensearch/reports/definition/get",
-                "cluster:admin/opensearch/reports/definitions/list",
                 "cluster:admin/opendistro/reports/definition/get",
-                "cluster:admin/opendistro/reports/definitions/list"
+                "cluster:admin/opendistro/reports/definition/list",
+                "cluster:admin/opendistro/reports/instance/get",
+                "cluster:admin/opendistro/reports/instance/list",
+                "cluster:admin/opendistro/reports/menu/download"
               ],
               "index_permissions": [
                 {
@@ -502,7 +515,7 @@ abstract class PluginRestTestCase : OpenSearchRestTestCase() {
         options.addHeader("Content-Type", "application/json")
         request.setOptions(options)
         request.setJsonEntity(body)
-        executeRequest(request)
+        executeAdminRequest(request)
     }
 
     @Throws(IOException::class)
@@ -518,7 +531,7 @@ abstract class PluginRestTestCase : OpenSearchRestTestCase() {
         options.addHeader("Content-Type", "application/json")
         request.setOptions(options)
         request.setJsonEntity(body)
-        executeRequest(request)
+        executeAdminRequest(request)
     }
 
     @Throws(IOException::class)
@@ -539,13 +552,13 @@ abstract class PluginRestTestCase : OpenSearchRestTestCase() {
     }
 
     @Throws(IOException::class)
-    fun patchSharingInfo(client: RestClient, payload: String?): JsonObject {
+    fun patchSharingInfo(client: RestClient, payload: String?) {
         val request = Request("PATCH", shareConfigUri)
         val options = RequestOptions.DEFAULT.toBuilder()
         options.addHeader("Content-Type", "application/json")
         request.setOptions(options)
         request.setJsonEntity(payload)
-        return executeRequest(client, request)
+        executeRequest(client, request)
     }
 
     fun shareWithUserPayload(resourceId: String?, resourceIndex: String?, accessLevel: String?, user: String?): String {
@@ -581,10 +594,10 @@ abstract class PluginRestTestCase : OpenSearchRestTestCase() {
         private var configType: String? = null
 
         // accessLevel -> recipientType -> principals
-        private val share: MutableMap<String?, MutableMap<String?, MutableSet<String?>?>> =
-            HashMap<String?, MutableMap<String?, MutableSet<String?>?>>()
-        private val revoke: MutableMap<String?, MutableMap<String?, MutableSet<String?>?>> =
-            HashMap<String?, MutableMap<String?, MutableSet<String?>?>>()
+        private val share: MutableMap<String, MutableMap<String, MutableSet<String>>> =
+            HashMap()
+        private val revoke: MutableMap<String, MutableMap<String, MutableSet<String>>> =
+            HashMap()
 
         fun configId(resourceId: String?): PatchSharingInfoPayloadBuilder {
             this.configId = resourceId
@@ -606,7 +619,7 @@ abstract class PluginRestTestCase : OpenSearchRestTestCase() {
 
         /* -------------------------------- Build -------------------------------- */
         private fun buildJsonString(
-            input: MutableMap<String?, MutableMap<String?, MutableSet<String?>?>>
+            input: MutableMap<String, MutableMap<String, MutableSet<String>>>
         ): String {
             val pieces = input.map { (key, value) ->
                 runCatching {
@@ -620,60 +633,61 @@ abstract class PluginRestTestCase : OpenSearchRestTestCase() {
         }
 
         fun build(): String {
-            val allShares = buildJsonString(share)
-            val allRevokes = buildJsonString(revoke)
-            return String.format(
-                Locale.ROOT,
-                """
-                {
-                  "resource_id": "%s",
-                  "resource_type": "%s",
-                  "add": {
-                    %s
-                  },
-                  "revoke": {
-                    %s
-                  }
-                }
-                
-                """.trimIndent(),
-                configId,
-                configType,
-                allShares,
-                allRevokes
-            )
+            val fields = mutableListOf<String>()
+
+            fields += "\"resource_id\": \"$configId\""
+            fields += "\"resource_type\": \"$configType\""
+
+            if (share.isNotEmpty()) {
+                val allShares = buildJsonString(share)
+                fields += "\"add\": { $allShares }"
+            }
+
+            if (revoke.isNotEmpty()) {
+                val allRevokes = buildJsonString(revoke)
+                fields += "\"revoke\": { $allRevokes }"
+            }
+
+            return "{\n  ${fields.joinToString(",\n  ")}\n}"
         }
 
         companion object {
-            /* ------------------------------ Internals ------------------------------ */
+            private fun recipientFieldName(recipient: Recipient): String =
+                when (recipient) {
+                    Recipient.USERS -> "users"
+                    Recipient.BACKEND_ROLES -> "backend_roles"
+                    Recipient.ROLES -> "roles"
+                }
+
             @Suppress("LoopWithTooManyJumpStatements")
             private fun mergeInto(
-                target: MutableMap<String?, MutableMap<String?, MutableSet<String?>?>>,
+                target: MutableMap<String, MutableMap<String, MutableSet<String>>>,
                 accessLevel: String?,
                 incoming: MutableMap<Recipient?, MutableSet<String?>?>?
             ) {
-                if (incoming == null || incoming.isEmpty()) return
-                val existing = target.getOrPut(accessLevel) { HashMap<String?, MutableSet<String?>?>() }
-                for (e in incoming.entries) {
-                    val key = e.key ?: continue
-                    val value = e.value
-                    if (value == null || value.isEmpty()) continue
-                    val recipientSet = existing.getOrPut(key.name) { HashSet<String?>() }
-                    recipientSet?.addAll(value)
+                if (accessLevel == null || incoming == null || incoming.isEmpty()) return
+                val existing = target.getOrPut(accessLevel) { HashMap() }
+                for ((recipient, principals) in incoming) {
+                    val key = recipient ?: continue
+                    val value = principals ?: continue
+                    if (value.isEmpty()) continue
+                    val fieldName = recipientFieldName(key)
+                    val recipientSet = existing.getOrPut(fieldName) { HashSet() }
+                    recipientSet.addAll(value.filterNotNull())
                 }
             }
 
             @Throws(IOException::class)
-            private fun toRecipientsJson(recipientsParam: MutableMap<String?, MutableSet<String?>?>?): String? {
+            private fun toRecipientsJson(recipientsParam: MutableMap<String, MutableSet<String>>?): String {
                 val recipients = recipientsParam ?: mutableMapOf()
 
                 val builder = XContentFactory.jsonBuilder()
                 builder.startObject()
 
                 for (recipient in Recipient.entries) {
-                    val key = recipient.name
-                    if (recipients.containsKey(key)) {
-                        writeArray(builder, key, recipients.get(key))
+                    val field = recipientFieldName(recipient)
+                    if (recipients.containsKey(field)) {
+                        writeArray(builder, field, recipients[field])
                     }
                 }
 
@@ -682,7 +696,7 @@ abstract class PluginRestTestCase : OpenSearchRestTestCase() {
             }
 
             @Throws(IOException::class)
-            private fun writeArray(builder: XContentBuilder, field: String, values: MutableSet<String?>?) {
+            private fun writeArray(builder: XContentBuilder, field: String, values: MutableSet<String>?) {
                 builder.startArray(field)
                 if (values != null) {
                     for (v in values) {
